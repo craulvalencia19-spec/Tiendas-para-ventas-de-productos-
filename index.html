@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crossport</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+<!-- Firebase (compat SDK, sin build tools, funciona directo en el navegador) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+</head>
+<body>
+
+<canvas id="fx"></canvas>
+
+<!-- ================= NAVBAR ================= -->
+<header class="navbar">
+  <div class="logo" onclick="goTo('home')">CROSS<span>PORT</span></div>
+  <nav>
+    <button class="nav-btn" onclick="goTo('home')">Inicio</button>
+    <button class="nav-btn" id="btnMiTienda" onclick="goTo('dashboard')" style="display:none">Mi tienda</button>
+    <button class="nav-btn" id="btnLogin" onclick="goTo('login')">Ingresar</button>
+    <button class="nav-btn" id="btnLogout" onclick="logout()" style="display:none">Salir</button>
+  </nav>
+</header>
+
+<!-- ================= HOME ================= -->
+<section id="view-home" class="view active">
+  <div class="hero">
+    <h1 class="glitch">CROSSPORT</h1>
+    <p class="subtitle">Crea tu tienda de ropa online en minutos. Tu catálogo, tu marca, tu QR.</p>
+    <div class="hero-actions">
+      <button class="btn-neon" onclick="goTo('register')">Crear cuenta</button>
+      <button class="btn-neon outline" onclick="goTo('login')">Ya tengo cuenta</button>
+    </div>
+  </div>
+
+  <div class="explore">
+    <h2>Tiendas creadas</h2>
+    <div id="storeList" class="store-grid"></div>
+  </div>
+</section>
+
+<!-- ================= REGISTER ================= -->
+<section id="view-register" class="view">
+  <div class="panel">
+    <h2>Nombre de empresa</h2>
+    <form id="formRegister">
+      <label>Nombre de la empresa</label>
+      <input type="text" id="regEmpresa" required placeholder="Ej. Crossport Store">
+
+      <label>Su nombre</label>
+      <input type="text" id="regNombre" required placeholder="Nombre completo">
+
+      <label>Su C.I.</label>
+      <input type="text" id="regCI" required placeholder="Carnet de identidad">
+
+      <label>Su clave</label>
+      <input type="password" id="regClave" required minlength="4" placeholder="Mínimo 4 caracteres">
+
+      <p class="warning">⚠ Guarda tu C.I. y tu clave. No podrás recuperarla si la pierdes.</p>
+
+      <button type="submit" class="btn-neon">Crear cuenta</button>
+    </form>
+  </div>
+</section>
+
+<!-- ================= LOGIN ================= -->
+<section id="view-login" class="view">
+  <div class="panel">
+    <h2>Ingresar</h2>
+    <form id="formLogin">
+      <label>Su C.I.</label>
+      <input type="text" id="loginCI" required>
+      <label>Su clave</label>
+      <input type="password" id="loginClave" required>
+      <button type="submit" class="btn-neon">Entrar</button>
+    </form>
+  </div>
+</section>
+
+<!-- ================= DASHBOARD (admin de la tienda) ================= -->
+<section id="view-dashboard" class="view">
+  <div class="dash-header">
+    <h2 id="dashEmpresaNombre">Mi tienda</h2>
+    <div class="dash-actions">
+      <button class="btn-neon small" onclick="goTo('addProduct')">+ Agregar producto</button>
+      <button class="btn-neon small outline" onclick="goTo('shareStore')">Compartir / QR</button>
+    </div>
+  </div>
+  <div id="dashProducts" class="product-grid"></div>
+</section>
+
+<!-- ================= ADD PRODUCT ================= -->
+<section id="view-addProduct" class="view">
+  <div class="panel">
+    <h2>Agregar producto</h2>
+    <form id="formProduct">
+      <label>Nombre del producto</label>
+      <input type="text" id="pNombre" required placeholder="Ej. Polera oversize">
+
+      <label>Material</label>
+      <input type="text" id="pMaterial" placeholder="Ej. Algodón">
+
+      <label>Tallas disponibles</label>
+      <div class="chip-select" id="pTallas">
+        <span class="chip" data-val="S">S</span>
+        <span class="chip" data-val="M">M</span>
+        <span class="chip" data-val="L">L</span>
+        <span class="chip" data-val="XL">XL</span>
+        <span class="chip" data-val="XXL">XXL</span>
+      </div>
+
+      <label>Colores (separados por coma)</label>
+      <input type="text" id="pColores" placeholder="Ej. Negro, Blanco, Rojo">
+
+      <label>Precio (Bs)</label>
+      <input type="number" id="pPrecio" required min="0" step="0.01">
+
+      <label>Descripción</label>
+      <textarea id="pDescripcion" rows="3" placeholder="Detalles del producto"></textarea>
+
+      <label>Foto del producto</label>
+      <input type="file" id="pFoto" accept="image/*">
+      <img id="pPreview" class="preview-img" style="display:none">
+
+      <button type="submit" class="btn-neon">Guardar producto</button>
+    </form>
+  </div>
+</section>
+
+<!-- ================= SHARE / QR ================= -->
+<section id="view-shareStore" class="view">
+  <div class="panel center">
+    <h2>Comparte tu tienda</h2>
+    <p>Escanea este código QR o comparte el enlace para que ingresen a tu tienda.</p>
+    <div id="qrcode"></div>
+    <input type="text" id="shareLink" readonly>
+    <button class="btn-neon small" onclick="copyLink()">Copiar enlace</button>
+  </div>
+</section>
+
+<!-- ================= STORE FRONT (vista pública tipo tienda) ================= -->
+<section id="view-store" class="view">
+  <div class="store-header">
+    <h1 id="storeNombre"></h1>
+    <p>Catálogo oficial</p>
+  </div>
+  <div id="storeProducts" class="product-grid"></div>
+</section>
+
+<script src="firebase-config.js"></script>
+<script src="script.js"></script>
+</body>
+</html>
