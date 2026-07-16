@@ -8,6 +8,7 @@ let session = JSON.parse(sessionStorage.getItem('cp_session') || 'null');
 
 // Carrito de la tienda que se está viendo actualmente (solo en memoria, por visita)
 let currentStoreCI = null;
+let currentStoreDeliveryEnabled = false;
 let cart = []; // { id, nombre, precio, cantidad }
 
 /* ---------- NAVEGACIÓN ---------- */
@@ -121,6 +122,7 @@ async function renderDashboard(){
   document.getElementById('dashEmpresaNombre').textContent = userDoc.data().empresa;
   document.getElementById('editWhatsapp').value = userDoc.data().whatsapp || '';
   document.getElementById('editDireccion').value = userDoc.data().direccion || '';
+  document.getElementById('editDeliveryHabilitado').checked = !!userDoc.data().deliveryHabilitado;
 
   const qrPagoGuardado = userDoc.data().qrPago;
   if(qrPagoGuardado){
@@ -245,6 +247,7 @@ document.getElementById('btnGuardarDatosTienda').addEventListener('click', async
   if(!session) return;
   const whatsapp = document.getElementById('editWhatsapp').value.trim().replace(/\D/g, '');
   const direccion = document.getElementById('editDireccion').value.trim();
+  const deliveryHabilitado = document.getElementById('editDeliveryHabilitado').checked;
 
   if(whatsapp === ''){
     alert('Debes ingresar un número de WhatsApp para que tus clientes puedan contactarte.');
@@ -253,7 +256,7 @@ document.getElementById('btnGuardarDatosTienda').addEventListener('click', async
 
   this.disabled = true; this.textContent = 'Guardando...';
   try{
-    await db.collection('tiendas').doc(session.ci).update({ whatsapp, direccion });
+    await db.collection('tiendas').doc(session.ci).update({ whatsapp, direccion, deliveryHabilitado });
     alert('Datos guardados correctamente.');
   } catch(err){
     console.error(err);
@@ -393,6 +396,7 @@ async function renderStoreFront(ci){
 
   // Si cambiamos de tienda, vaciamos el carrito anterior
   if(currentStoreCI !== ci){ cart = []; currentStoreCI = ci; }
+  currentStoreDeliveryEnabled = !!userDoc.data().deliveryHabilitado;
   updateCartUI();
 
   const snap = await db.collection('tiendas').doc(ci).collection('productos')
@@ -551,6 +555,21 @@ function goToCheckout(){
     return;
   }
   closeCart();
+
+  // Si el anfitrión de esta tienda no activó el delivery, solo se ofrece "Recojo en tienda"
+  const entregaBox = document.getElementById('entregaOptions');
+  const deliveryChip = entregaBox.querySelector('[data-val="delivery"]');
+  const recojoChip = entregaBox.querySelector('[data-val="recojo"]');
+  if(currentStoreDeliveryEnabled){
+    deliveryChip.style.display = 'inline-block';
+  } else {
+    deliveryChip.style.display = 'none';
+    deliveryChip.classList.remove('active');
+    recojoChip.classList.add('active');
+    tipoEntregaSeleccionado = 'recojo';
+    document.getElementById('direccionEntregaBox').style.display = 'none';
+  }
+
   goTo('checkout');
 }
 
@@ -563,6 +582,27 @@ function renderCheckoutResumen(){
 
 /* ---------- TIPO DE ENTREGA (recojo o delivery) ---------- */
 let tipoEntregaSeleccionado = 'recojo';
+let ubicacionCliente = null; // { lat, lng }
+
+document.getElementById('btnCompartirUbicacion').addEventListener('click', function(){
+  if(!navigator.geolocation){
+    document.getElementById('ubicacionStatus').textContent = 'Tu navegador no permite compartir ubicación.';
+    return;
+  }
+  this.disabled = true; this.textContent = 'Obteniendo ubicación...';
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      ubicacionCliente = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      document.getElementById('ubicacionStatus').textContent = '✓ Ubicación compartida correctamente.';
+      this.disabled = false; this.textContent = '📍 Compartir mi ubicación';
+    },
+    () => {
+      document.getElementById('ubicacionStatus').textContent = 'No se pudo obtener tu ubicación. Puedes seguir sin ella.';
+      this.disabled = false; this.textContent = '📍 Compartir mi ubicación';
+    }
+  );
+});
+
 document.querySelectorAll('#entregaOptions .chip').forEach(chip => {
   chip.addEventListener('click', () => {
     document.querySelectorAll('#entregaOptions .chip').forEach(c => c.classList.remove('active'));
@@ -582,6 +622,7 @@ document.getElementById('formCheckout').addEventListener('submit', async functio
   const cliTelefono = document.getElementById('cliTelefono').value.trim().replace(/\D/g, '');
   const cliGmail = document.getElementById('cliGmail').value.trim();
   const cliDireccion = document.getElementById('cliDireccion').value.trim();
+  const cliNombreReceptor = document.getElementById('cliNombreReceptor').value.trim();
 
   if(tipoEntregaSeleccionado === 'delivery' && cliDireccion === ''){
     alert('Debes escribir la dirección de entrega para el delivery.');
@@ -594,6 +635,8 @@ document.getElementById('formCheckout').addEventListener('submit', async functio
     clienteGmail: cliGmail,
     tipoEntrega: tipoEntregaSeleccionado,
     direccionEntrega: tipoEntregaSeleccionado === 'delivery' ? cliDireccion : '',
+    nombreReceptor: tipoEntregaSeleccionado === 'delivery' ? cliNombreReceptor : '',
+    ubicacion: tipoEntregaSeleccionado === 'delivery' ? ubicacionCliente : null,
     items: cart.map(it => ({ nombre: it.nombre, cantidad: it.cantidad, precio: it.precio, talla: it.talla })),
     total: cartTotal(),
     estado: 'nuevo',
@@ -631,6 +674,8 @@ document.getElementById('formCheckout').addEventListener('submit', async functio
     updateCartUI();
     this.reset();
     tipoEntregaSeleccionado = 'recojo';
+    ubicacionCliente = null;
+    document.getElementById('ubicacionStatus').textContent = '';
     document.querySelectorAll('#entregaOptions .chip').forEach((c, i) => c.classList.toggle('active', i === 0));
     document.getElementById('direccionEntregaBox').style.display = 'none';
     goTo('orderDone');
@@ -734,6 +779,8 @@ async function renderPedidos(){
         <div class="meta">📱 ${p.clienteTelefono || '-'}</div>
         <div class="pedido-items">${(p.items||[]).map(it => `${it.cantidad}x ${it.nombre}${it.talla ? ' (Talla ' + it.talla + ')' : ''}`).join(', ')}</div>
         <div class="meta">${p.tipoEntrega === 'delivery' ? '🛵 Delivery a domicilio: ' + (p.direccionEntrega || '-') : '🏬 Recojo en tienda'}</div>
+        ${p.tipoEntrega === 'delivery' && p.nombreReceptor ? `<div class="meta">Recibe: ${p.nombreReceptor}</div>` : ''}
+        ${p.tipoEntrega === 'delivery' && p.ubicacion ? `<a class="meta" style="color:var(--cyan)" href="https://www.google.com/maps?q=${p.ubicacion.lat},${p.ubicacion.lng}" target="_blank">📍 Ver ubicación en el mapa</a>` : ''}
         <div class="price">Total: Bs ${Number(p.total).toFixed(2)}</div>
       </div>
       <div class="pedido-actions">

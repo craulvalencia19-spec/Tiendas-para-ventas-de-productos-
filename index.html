@@ -147,6 +147,12 @@
     <input type="text" id="editWhatsapp" placeholder="Ej. 59171234567">
     <label>¿En qué lugares vendes? (opcional)</label>
     <textarea id="editDireccion" rows="2" placeholder="Ej. Mercado Camacho, Feria 16 de Julio los domingos..."></textarea>
+
+    <label style="display:flex; align-items:center; gap:10px; margin-top:16px;">
+      <input type="checkbox" id="editDeliveryHabilitado" style="width:auto;">
+      Ofrecer delivery a domicilio (si no lo activas, tus clientes solo verán "Recojo en tienda")
+    </label>
+
     <button class="btn-neon small" id="btnGuardarDatosTienda" style="margin-top:14px;">Guardar datos</button>
   </div>
 
@@ -271,6 +277,13 @@
       <div id="direccionEntregaBox" style="display:none">
         <label>Dirección de entrega</label>
         <input type="text" id="cliDireccion" placeholder="Calle, zona, referencia...">
+
+        <label>¿A nombre de quién se entrega el pedido?</label>
+        <input type="text" id="cliNombreReceptor" placeholder="Nombre de quien recogerá el pedido">
+
+        <label>Ubicación exacta (opcional, ayuda al repartidor)</label>
+        <button type="button" class="btn-neon small outline" id="btnCompartirUbicacion">📍 Compartir mi ubicación</button>
+        <p id="ubicacionStatus" class="meta" style="margin-top:8px;"></p>
       </div>
 
       <div id="checkoutResumen" class="checkout-resumen"></div>
