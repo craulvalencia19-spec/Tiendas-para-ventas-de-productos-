@@ -64,6 +64,7 @@
   <div id="cartItems" class="cart-items"></div>
   <div class="cart-footer">
     <div class="cart-total-row">Total: <span id="cartTotalBig">Bs 0.00</span></div>
+    <button class="btn-neon outline small" id="btnPagarQr" onclick="mostrarQrPago()" style="width:100%; margin-bottom:10px;">💳 Pagar producto (QR)</button>
     <button class="btn-neon" onclick="goToCheckout()">Realizar pedido</button>
   </div>
 </div>
@@ -287,6 +288,8 @@
       </div>
 
       <div id="checkoutResumen" class="checkout-resumen"></div>
+
+      <button type="button" class="btn-neon outline small" onclick="mostrarQrPago()" style="width:100%; margin:14px 0;">💳 Pagar producto (QR)</button>
 
       <button type="submit" class="btn-neon">Confirmar pedido</button>
     </form>

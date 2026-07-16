@@ -9,6 +9,7 @@ let session = JSON.parse(sessionStorage.getItem('cp_session') || 'null');
 // Carrito de la tienda que se está viendo actualmente (solo en memoria, por visita)
 let currentStoreCI = null;
 let currentStoreDeliveryEnabled = false;
+let currentStorePagoQr = '';
 let cart = []; // { id, nombre, precio, cantidad }
 
 /* ---------- NAVEGACIÓN ---------- */
@@ -171,6 +172,14 @@ function openImageModal(src){
 }
 function closeImageModal(){
   document.getElementById('imageModal').classList.remove('open');
+}
+
+function mostrarQrPago(){
+  if(!currentStorePagoQr){
+    alert('Esta tienda todavía no configuró un QR de pago. Contáctala por WhatsApp para coordinar el pago.');
+    return;
+  }
+  openImageModal(currentStorePagoQr);
 }
 
 /* ---------- AGREGAR PRODUCTO ---------- */
@@ -386,6 +395,7 @@ async function renderStoreFront(ci){
 
   // Método de pago por QR (si el anfitrión lo configuró)
   const qrPago = userDoc.data().qrPago || '';
+  currentStorePagoQr = qrPago;
   const pagoBox = document.getElementById('storePagoQr');
   if(qrPago){
     document.getElementById('storePagoQrImg').src = qrPago;
