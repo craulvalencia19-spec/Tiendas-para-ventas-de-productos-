@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Crossport</title>
+<title>Crissport</title>
 <link rel="stylesheet" href="style.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 
@@ -17,19 +17,62 @@
 
 <!-- ================= NAVBAR ================= -->
 <header class="navbar">
-  <div class="logo" onclick="goTo('home')">CROSS<span>PORT</span></div>
+  <div class="logo" onclick="goTo('home')">CRIS<span>SPORT</span></div>
   <nav>
     <button class="nav-btn" onclick="goTo('home')">Inicio</button>
     <button class="nav-btn" id="btnMiTienda" onclick="goTo('dashboard')" style="display:none">Mi tienda</button>
+    <button class="nav-btn" id="btnPedidos" onclick="goTo('pedidos')" style="display:none">Pedidos</button>
     <button class="nav-btn" id="btnLogin" onclick="goTo('login')">Ingresar</button>
     <button class="nav-btn" id="btnLogout" onclick="logout()" style="display:none">Salir</button>
   </nav>
 </header>
 
+<!-- Botón flotante del carrito (solo visible en la vista de tienda pública) -->
+<div id="cartFloat" class="cart-float" style="display:none" onclick="toggleCart()">
+  🛒 <span id="cartCount">0</span> · <span id="cartTotal">Bs 0.00</span>
+</div>
+
+<!-- Botón flotante de WhatsApp de ESA tienda específica -->
+<a id="whatsappFloat" class="whatsapp-float" style="display:none" target="_blank" title="Contactar a la tienda por WhatsApp">
+  💬 WhatsApp
+</a>
+
+<!-- Modal para ver la imagen del producto en grande -->
+<div id="imageModal" class="image-modal" onclick="closeImageModal()">
+  <img id="imageModalImg" src="" alt="Producto">
+</div>
+
+<!-- Modal para pedir el motivo al quitar un producto del carrito -->
+<div id="removeModal" class="remove-modal">
+  <div class="remove-modal-box">
+    <h3>Quitar producto del carrito</h3>
+    <p>Si quieres, cuéntanos por qué lo quitas (opcional):</p>
+    <textarea id="removeReasonInput" rows="3" placeholder="Ej. cambié de opinión, elegí otra talla..."></textarea>
+    <div class="remove-modal-actions">
+      <button class="btn-neon outline small" onclick="cancelRemoveFromCart()">Cancelar</button>
+      <button class="btn-neon small" onclick="confirmRemoveFromCart()">Quitar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Panel del carrito -->
+<div id="cartPanel" class="cart-panel">
+  <div class="cart-panel-header">
+    <h3>Tu carrito</h3>
+    <button class="close-btn" onclick="toggleCart()">✕</button>
+  </div>
+  <div id="cartItems" class="cart-items"></div>
+  <div class="cart-footer">
+    <div class="cart-total-row">Total: <span id="cartTotalBig">Bs 0.00</span></div>
+    <button class="btn-neon" onclick="goToCheckout()">Realizar pedido</button>
+  </div>
+</div>
+<div id="cartOverlay" class="cart-overlay" onclick="toggleCart()"></div>
+
 <!-- ================= HOME ================= -->
 <section id="view-home" class="view active">
   <div class="hero">
-    <h1 class="glitch">CROSSPORT</h1>
+    <h1 class="glitch">CRISSPORT</h1>
     <p class="subtitle">Crea tu tienda de ropa online en minutos. Tu catálogo, tu marca, tu QR.</p>
     <div class="hero-actions">
       <button class="btn-neon" onclick="goTo('register')">Crear cuenta</button>
@@ -59,6 +102,12 @@
 
       <label>Su clave</label>
       <input type="password" id="regClave" required minlength="4" placeholder="Mínimo 4 caracteres">
+
+      <label>WhatsApp de la tienda (con código de país)</label>
+      <input type="text" id="regWhatsapp" required placeholder="Ej. 59171234567">
+
+      <label>¿En qué lugares vendes? (opcional)</label>
+      <textarea id="regDireccion" rows="2" placeholder="Ej. Mercado Camacho, Feria 16 de Julio los domingos..."></textarea>
 
       <p class="warning">⚠ Guarda tu C.I. y tu clave. No podrás recuperarla si la pierdes.</p>
 
@@ -90,6 +139,25 @@
       <button class="btn-neon small outline" onclick="goTo('shareStore')">Compartir / QR</button>
     </div>
   </div>
+
+  <div class="panel" style="margin-bottom:30px;">
+    <h2>Datos de contacto de la tienda</h2>
+    <p style="color:var(--muted); font-size:13px;">Este número es el que verán y usarán tus clientes para contactarte (botón flotante de WhatsApp).</p>
+    <label>WhatsApp de la tienda</label>
+    <input type="text" id="editWhatsapp" placeholder="Ej. 59171234567">
+    <label>¿En qué lugares vendes? (opcional)</label>
+    <textarea id="editDireccion" rows="2" placeholder="Ej. Mercado Camacho, Feria 16 de Julio los domingos..."></textarea>
+    <button class="btn-neon small" id="btnGuardarDatosTienda" style="margin-top:14px;">Guardar datos</button>
+  </div>
+
+  <div class="panel" style="margin-bottom:30px;">
+    <h2>QR para pago</h2>
+    <p style="color:var(--muted); font-size:13px;">Sube el QR de tu banco/billetera para que tus clientes puedan pagarte. Se mostrará en tu tienda como método de pago.</p>
+    <input type="file" id="pagoQrFoto" accept="image/*">
+    <img id="pagoQrPreview" class="preview-img" style="display:none">
+    <button class="btn-neon small" id="btnGuardarQrPago" style="margin-top:14px;">Guardar QR de pago</button>
+  </div>
+
   <div id="dashProducts" class="product-grid"></div>
 </section>
 
@@ -147,8 +215,86 @@
   <div class="store-header">
     <h1 id="storeNombre"></h1>
     <p>Catálogo oficial</p>
+    <div id="storeInfoExtra" class="store-info-extra"></div>
+    <button class="btn-neon small outline" onclick="goTo('misPedidos')">Mis pedidos</button>
   </div>
+
+  <div id="storePagoQr" class="pago-qr-box" style="display:none">
+    <h3>Método de pago: Solo por QR</h3>
+    <img id="storePagoQrImg" src="" alt="QR de pago">
+  </div>
+
   <div id="storeProducts" class="product-grid"></div>
+</section>
+
+<!-- Modal para elegir la talla obligatoria antes de agregar al carrito -->
+<div id="tallaModal" class="remove-modal">
+  <div class="remove-modal-box">
+    <h3>Elige tu talla</h3>
+    <p>Selecciona la talla que quieres pedir (obligatorio):</p>
+    <div id="tallaOptions" class="chip-select"></div>
+    <div class="remove-modal-actions">
+      <button class="btn-neon outline small" onclick="cancelTallaModal()">Cancelar</button>
+      <button class="btn-neon small" onclick="confirmTallaModal()">Agregar al carrito</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= MIS PEDIDOS (lista 1, solo del cliente que compró) ================= -->
+<section id="view-misPedidos" class="view">
+  <div class="dash-header">
+    <h2>Mis pedidos en esta tienda</h2>
+  </div>
+  <div id="misPedidosList" class="pedidos-list"></div>
+</section>
+
+<!-- ================= CHECKOUT (datos del cliente para el pedido) ================= -->
+<section id="view-checkout" class="view">
+  <div class="panel">
+    <h2>Completa tu pedido</h2>
+    <form id="formCheckout">
+      <label>Tu nombre</label>
+      <input type="text" id="cliNombre" required placeholder="Nombre completo">
+
+      <label>Tu WhatsApp / teléfono</label>
+      <input type="text" id="cliTelefono" required placeholder="Ej. 59171234567">
+
+      <label>Tu Gmail</label>
+      <input type="email" id="cliGmail" placeholder="tucorreo@gmail.com">
+
+      <label>¿Cómo quieres recibir tu pedido?</label>
+      <div class="chip-select" id="entregaOptions">
+        <span class="chip active" data-val="recojo">Recojo en tienda</span>
+        <span class="chip" data-val="delivery">🛵 Delivery a domicilio</span>
+      </div>
+
+      <div id="direccionEntregaBox" style="display:none">
+        <label>Dirección de entrega</label>
+        <input type="text" id="cliDireccion" placeholder="Calle, zona, referencia...">
+      </div>
+
+      <div id="checkoutResumen" class="checkout-resumen"></div>
+
+      <button type="submit" class="btn-neon">Confirmar pedido</button>
+    </form>
+  </div>
+</section>
+
+<!-- ================= CONFIRMACIÓN DE PEDIDO ================= -->
+<section id="view-orderDone" class="view">
+  <div class="panel center">
+    <h2>¡Pedido enviado!</h2>
+    <p>Tu pedido ya fue registrado. Puedes contactar directamente a la tienda para coordinar el pago y la entrega.</p>
+    <a id="btnWhatsappTienda" class="btn-neon" target="_blank">Contactar por WhatsApp</a>
+  </div>
+</section>
+
+<!-- ================= PEDIDOS (solo anfitrión) ================= -->
+<section id="view-pedidos" class="view">
+  <div class="dash-header">
+    <h2>Pedidos recibidos</h2>
+  </div>
+  <div id="pedidosList" class="pedidos-list"></div>
 </section>
 
 <script src="firebase-config.js"></script>

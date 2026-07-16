@@ -6,21 +6,34 @@
 
 let session = JSON.parse(sessionStorage.getItem('cp_session') || 'null');
 
+// Carrito de la tienda que se está viendo actualmente (solo en memoria, por visita)
+let currentStoreCI = null;
+let cart = []; // { id, nombre, precio, cantidad }
+
 /* ---------- NAVEGACIÓN ---------- */
 function goTo(view, data){
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.getElementById('view-' + view).classList.add('active');
   window.scrollTo({top:0, behavior:'smooth'});
 
+  // El botón flotante del carrito y de WhatsApp solo se muestran dentro de la tienda pública
+  document.getElementById('cartFloat').style.display = (view === 'store') ? 'flex' : 'none';
+  document.getElementById('whatsappFloat').style.display = (view === 'store') ? 'flex' : 'none';
+  closeCart();
+
   if(view === 'home') renderStoreList();
   if(view === 'dashboard') renderDashboard();
   if(view === 'shareStore') renderShare();
   if(view === 'store' && data) renderStoreFront(data);
+  if(view === 'checkout') renderCheckoutResumen();
+  if(view === 'pedidos') renderPedidos();
+  if(view === 'misPedidos') renderMisPedidos();
 }
 
 function updateNav(){
   const logged = !!session;
   document.getElementById('btnMiTienda').style.display = logged ? 'inline-block' : 'none';
+  document.getElementById('btnPedidos').style.display = logged ? 'inline-block' : 'none';
   document.getElementById('btnLogout').style.display = logged ? 'inline-block' : 'none';
   document.getElementById('btnLogin').style.display = logged ? 'none' : 'inline-block';
 }
@@ -39,6 +52,8 @@ document.getElementById('formRegister').addEventListener('submit', async functio
   const nombre = document.getElementById('regNombre').value.trim();
   const ci = document.getElementById('regCI').value.trim();
   const clave = document.getElementById('regClave').value;
+  const whatsapp = document.getElementById('regWhatsapp').value.trim().replace(/\D/g, '');
+  const direccion = document.getElementById('regDireccion').value.trim();
 
   const btn = this.querySelector('button');
   btn.disabled = true; btn.textContent = 'Creando...';
@@ -51,7 +66,7 @@ document.getElementById('formRegister').addEventListener('submit', async functio
       return;
     }
     await ref.set({
-      empresa, nombre, ci, clave,
+      empresa, nombre, ci, clave, whatsapp, direccion,
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
 
@@ -104,6 +119,14 @@ async function renderDashboard(){
   const userDoc = await db.collection('tiendas').doc(session.ci).get();
   if(!userDoc.exists){ logout(); return; }
   document.getElementById('dashEmpresaNombre').textContent = userDoc.data().empresa;
+  document.getElementById('editWhatsapp').value = userDoc.data().whatsapp || '';
+  document.getElementById('editDireccion').value = userDoc.data().direccion || '';
+
+  const qrPagoGuardado = userDoc.data().qrPago;
+  if(qrPagoGuardado){
+    document.getElementById('pagoQrPreview').src = qrPagoGuardado;
+    document.getElementById('pagoQrPreview').style.display = 'block';
+  }
 
   const snap = await db.collection('tiendas').doc(session.ci).collection('productos')
     .orderBy('createdAt', 'desc').get();
@@ -113,22 +136,39 @@ async function renderDashboard(){
     cont.innerHTML = '<p style="color:var(--muted)">Aún no agregaste productos. Usa "+ Agregar producto".</p>';
     return;
   }
-  snap.forEach(doc => cont.appendChild(productCard(doc.data())));
+  snap.forEach(doc => cont.appendChild(productCard(doc.data(), doc.id, false)));
 }
 
-function productCard(p){
+function productCard(p, id, isPublic){
   const div = document.createElement('div');
   div.className = 'product-card';
   div.innerHTML = `
-    <img src="${p.foto || 'https://via.placeholder.com/300x200?text=Sin+foto'}" alt="${p.nombre}">
+    <img src="${p.foto || 'https://via.placeholder.com/300x200?text=Sin+foto'}" alt="${p.nombre}" class="product-img-clickable">
     <div class="info">
       <h4>${p.nombre}</h4>
       <div class="price">Bs ${Number(p.precio).toFixed(2)}</div>
       <div class="meta">Tallas: ${(p.tallas || []).join(', ') || '-'}</div>
       <div class="meta">Colores: ${p.colores || '-'}</div>
+      <button class="btn-neon small outline ver-img-btn">Ver imagen</button>
+      ${isPublic ? `<button class="btn-neon small add-cart-btn">Agregar al carrito</button>` : ''}
     </div>
   `;
+  const img = div.querySelector('.product-img-clickable');
+  const imgSrc = p.foto || 'https://via.placeholder.com/300x200?text=Sin+foto';
+  img.addEventListener('click', () => openImageModal(imgSrc));
+  div.querySelector('.ver-img-btn').addEventListener('click', () => openImageModal(imgSrc));
+  if(isPublic){
+    div.querySelector('.add-cart-btn').addEventListener('click', () => openTallaModal(id, p));
+  }
   return div;
+}
+
+function openImageModal(src){
+  document.getElementById('imageModalImg').src = src;
+  document.getElementById('imageModal').classList.add('open');
+}
+function closeImageModal(){
+  document.getElementById('imageModal').classList.remove('open');
 }
 
 /* ---------- AGREGAR PRODUCTO ---------- */
@@ -141,8 +181,22 @@ document.getElementById('pFoto').addEventListener('change', function(e){
   if(!file) return;
   const reader = new FileReader();
   reader.onload = evt => {
-    document.getElementById('pPreview').src = evt.target.result;
-    document.getElementById('pPreview').style.display = 'block';
+    const img = new Image();
+    img.onload = () => {
+      // Redimensionamos la imagen para que no sea demasiado pesada (límite de Firestore: 1MB por documento)
+      const maxWidth = 700;
+      const scale = Math.min(1, maxWidth / img.width);
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width * scale;
+      canvas.height = img.height * scale;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const compressed = canvas.toDataURL('image/jpeg', 0.7);
+
+      document.getElementById('pPreview').src = compressed;
+      document.getElementById('pPreview').style.display = 'block';
+    };
+    img.src = evt.target.result;
   };
   reader.readAsDataURL(file);
 });
@@ -183,6 +237,72 @@ document.getElementById('formProduct').addEventListener('submit', async function
     alert('Error al guardar el producto. Si subiste una foto muy grande, prueba con una más liviana.');
   } finally {
     btn.disabled = false; btn.textContent = 'Guardar producto';
+  }
+});
+
+/* ---------- EDITAR DATOS DE CONTACTO (whatsapp, dirección) ---------- */
+document.getElementById('btnGuardarDatosTienda').addEventListener('click', async function(){
+  if(!session) return;
+  const whatsapp = document.getElementById('editWhatsapp').value.trim().replace(/\D/g, '');
+  const direccion = document.getElementById('editDireccion').value.trim();
+
+  if(whatsapp === ''){
+    alert('Debes ingresar un número de WhatsApp para que tus clientes puedan contactarte.');
+    return;
+  }
+
+  this.disabled = true; this.textContent = 'Guardando...';
+  try{
+    await db.collection('tiendas').doc(session.ci).update({ whatsapp, direccion });
+    alert('Datos guardados correctamente.');
+  } catch(err){
+    console.error(err);
+    alert('Error al guardar los datos.');
+  } finally {
+    this.disabled = false; this.textContent = 'Guardar datos';
+  }
+});
+
+/* ---------- QR DE PAGO (dashboard del anfitrión) ---------- */
+document.getElementById('pagoQrFoto').addEventListener('change', function(e){
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = evt => {
+    const img = new Image();
+    img.onload = () => {
+      const maxWidth = 500;
+      const scale = Math.min(1, maxWidth / img.width);
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width * scale;
+      canvas.height = img.height * scale;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const compressed = canvas.toDataURL('image/png');
+      document.getElementById('pagoQrPreview').src = compressed;
+      document.getElementById('pagoQrPreview').style.display = 'block';
+    };
+    img.src = evt.target.result;
+  };
+  reader.readAsDataURL(file);
+});
+
+document.getElementById('btnGuardarQrPago').addEventListener('click', async function(){
+  if(!session) return;
+  const preview = document.getElementById('pagoQrPreview');
+  if(preview.style.display !== 'block'){
+    alert('Primero selecciona una imagen de tu QR de pago.');
+    return;
+  }
+  this.disabled = true; this.textContent = 'Guardando...';
+  try{
+    await db.collection('tiendas').doc(session.ci).update({ qrPago: preview.src });
+    alert('QR de pago guardado. Ya aparece en tu tienda.');
+  } catch(err){
+    console.error(err);
+    alert('Error al guardar el QR de pago.');
+  } finally {
+    this.disabled = false; this.textContent = 'Guardar QR de pago';
   }
 });
 
@@ -243,6 +363,38 @@ async function renderStoreFront(ci){
   }
   document.getElementById('storeNombre').textContent = userDoc.data().empresa;
 
+  // Botón flotante de WhatsApp: usa el número propio de ESTA tienda (no se cruza con otras)
+  const waFloat = document.getElementById('whatsappFloat');
+  const storeWhatsapp = userDoc.data().whatsapp || '';
+  if(storeWhatsapp){
+    waFloat.href = `https://wa.me/${storeWhatsapp}?text=${encodeURIComponent('Hola, quiero más información sobre sus productos.')}`;
+    waFloat.style.display = 'flex';
+  } else {
+    waFloat.style.display = 'none';
+  }
+
+  // Teléfono y direcciones de venta, visibles para el cliente
+  const infoCont = document.getElementById('storeInfoExtra');
+  const direccion = userDoc.data().direccion || '';
+  infoCont.innerHTML = `
+    ${storeWhatsapp ? `<div class="store-info-line">📞 ${storeWhatsapp}</div>` : ''}
+    ${direccion ? `<div class="store-info-line">📍 ${direccion}</div>` : ''}
+  `;
+
+  // Método de pago por QR (si el anfitrión lo configuró)
+  const qrPago = userDoc.data().qrPago || '';
+  const pagoBox = document.getElementById('storePagoQr');
+  if(qrPago){
+    document.getElementById('storePagoQrImg').src = qrPago;
+    pagoBox.style.display = 'block';
+  } else {
+    pagoBox.style.display = 'none';
+  }
+
+  // Si cambiamos de tienda, vaciamos el carrito anterior
+  if(currentStoreCI !== ci){ cart = []; currentStoreCI = ci; }
+  updateCartUI();
+
   const snap = await db.collection('tiendas').doc(ci).collection('productos')
     .orderBy('createdAt', 'desc').get();
 
@@ -251,7 +403,358 @@ async function renderStoreFront(ci){
     cont.innerHTML = '<p style="color:var(--muted); text-align:center; grid-column:1/-1;">Esta tienda todavía no tiene productos.</p>';
     return;
   }
-  snap.forEach(doc => cont.appendChild(productCard(doc.data())));
+  snap.forEach(doc => cont.appendChild(productCard(doc.data(), doc.id, true)));
+}
+
+/* =========================================================
+   CARRITO DE COMPRAS
+   ========================================================= */
+/* =========================================================
+   CARRITO DE COMPRAS (con talla obligatoria)
+   ========================================================= */
+let pendingTallaProduct = null; // { id, p }
+
+function openTallaModal(id, p){
+  const tallas = p.tallas || [];
+  if(tallas.length === 0){
+    // Si el producto no tiene tallas cargadas, se agrega directo
+    addToCart(id, p, '-');
+    return;
+  }
+  pendingTallaProduct = { id, p };
+  const optionsCont = document.getElementById('tallaOptions');
+  optionsCont.innerHTML = tallas.map(t => `<span class="chip" data-val="${t}">${t}</span>`).join('');
+  optionsCont.querySelectorAll('.chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      optionsCont.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+    });
+  });
+  document.getElementById('tallaModal').classList.add('open');
+}
+
+function cancelTallaModal(){
+  pendingTallaProduct = null;
+  document.getElementById('tallaModal').classList.remove('open');
+}
+
+function confirmTallaModal(){
+  const selected = document.querySelector('#tallaOptions .chip.active');
+  if(!selected){
+    alert('Debes elegir una talla para continuar.');
+    return;
+  }
+  const talla = selected.dataset.val;
+  addToCart(pendingTallaProduct.id, pendingTallaProduct.p, talla);
+  pendingTallaProduct = null;
+  document.getElementById('tallaModal').classList.remove('open');
+}
+
+function addToCart(id, p, talla){
+  // Cada combinación producto + talla es una línea distinta en el carrito
+  const key = id + '|' + talla;
+  const existing = cart.find(it => it.key === key);
+  if(existing){
+    existing.cantidad += 1;
+  } else {
+    cart.push({ key, id, talla, nombre: p.nombre, precio: Number(p.precio), cantidad: 1 });
+  }
+  updateCartUI();
+}
+
+function increaseQty(key){
+  const item = cart.find(it => it.key === key);
+  if(item){ item.cantidad += 1; updateCartUI(); }
+}
+
+function decreaseQty(key){
+  const item = cart.find(it => it.key === key);
+  if(!item) return;
+  item.cantidad -= 1;
+  if(item.cantidad <= 0){
+    cart = cart.filter(it => it.key !== key);
+  }
+  updateCartUI();
+}
+
+let pendingRemoveKey = null;
+
+function removeFromCart(key){
+  pendingRemoveKey = key;
+  document.getElementById('removeReasonInput').value = '';
+  document.getElementById('removeModal').classList.add('open');
+}
+
+function cancelRemoveFromCart(){
+  pendingRemoveKey = null;
+  document.getElementById('removeModal').classList.remove('open');
+}
+
+function confirmRemoveFromCart(){
+  // El comentario ya es opcional, no bloquea la acción.
+  cart = cart.filter(it => it.key !== pendingRemoveKey);
+  pendingRemoveKey = null;
+  document.getElementById('removeModal').classList.remove('open');
+  updateCartUI();
+}
+
+function cartTotal(){
+  return cart.reduce((sum, it) => sum + it.precio * it.cantidad, 0);
+}
+
+function updateCartUI(){
+  const count = cart.reduce((s, it) => s + it.cantidad, 0);
+  document.getElementById('cartCount').textContent = count;
+  document.getElementById('cartTotal').textContent = 'Bs ' + cartTotal().toFixed(2);
+  document.getElementById('cartTotalBig').textContent = 'Bs ' + cartTotal().toFixed(2);
+
+  const itemsCont = document.getElementById('cartItems');
+  itemsCont.innerHTML = '';
+  if(cart.length === 0){
+    itemsCont.innerHTML = '<p style="color:var(--muted)">Tu carrito está vacío.</p>';
+    return;
+  }
+  cart.forEach((it, index) => {
+    const row = document.createElement('div');
+    row.className = 'cart-item';
+    row.innerHTML = `
+      <div>
+        <div class="cart-item-name">${index + 1}. ${it.nombre} ${it.talla !== '-' ? '(Talla ' + it.talla + ')' : ''}</div>
+        <div class="cart-item-meta">Bs ${(it.precio*it.cantidad).toFixed(2)}</div>
+        <div class="qty-controls">
+          <button class="qty-btn qty-minus">−</button>
+          <span class="qty-value">${it.cantidad}</span>
+          <button class="qty-btn qty-plus">+</button>
+        </div>
+      </div>
+      <button class="cart-remove-btn" title="Quitar del carrito">✕</button>
+    `;
+    row.querySelector('.qty-minus').addEventListener('click', () => decreaseQty(it.key));
+    row.querySelector('.qty-plus').addEventListener('click', () => increaseQty(it.key));
+    row.querySelector('.cart-remove-btn').addEventListener('click', () => removeFromCart(it.key));
+    itemsCont.appendChild(row);
+  });
+}
+
+function toggleCart(){
+  document.getElementById('cartPanel').classList.toggle('open');
+  document.getElementById('cartOverlay').classList.toggle('open');
+}
+function closeCart(){
+  document.getElementById('cartPanel').classList.remove('open');
+  document.getElementById('cartOverlay').classList.remove('open');
+}
+
+function goToCheckout(){
+  if(cart.length === 0){
+    alert('Tu carrito está vacío. Agrega algún producto primero.');
+    return;
+  }
+  closeCart();
+  goTo('checkout');
+}
+
+function renderCheckoutResumen(){
+  const cont = document.getElementById('checkoutResumen');
+  cont.innerHTML = '<h4>Resumen del pedido</h4>' + cart.map(it =>
+    `<div class="cart-item-meta">${it.cantidad} x ${it.nombre} ${it.talla !== '-' ? '(Talla ' + it.talla + ')' : ''} — Bs ${(it.precio*it.cantidad).toFixed(2)}</div>`
+  ).join('') + `<div class="checkout-total">Total: Bs ${cartTotal().toFixed(2)}</div>`;
+}
+
+/* ---------- TIPO DE ENTREGA (recojo o delivery) ---------- */
+let tipoEntregaSeleccionado = 'recojo';
+document.querySelectorAll('#entregaOptions .chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('#entregaOptions .chip').forEach(c => c.classList.remove('active'));
+    chip.classList.add('active');
+    tipoEntregaSeleccionado = chip.dataset.val;
+    document.getElementById('direccionEntregaBox').style.display =
+      tipoEntregaSeleccionado === 'delivery' ? 'block' : 'none';
+  });
+});
+
+/* ---------- CONFIRMAR PEDIDO (checkout) ---------- */
+document.getElementById('formCheckout').addEventListener('submit', async function(e){
+  e.preventDefault();
+  if(!currentStoreCI){ goTo('home'); return; }
+
+  const cliNombre = document.getElementById('cliNombre').value.trim();
+  const cliTelefono = document.getElementById('cliTelefono').value.trim().replace(/\D/g, '');
+  const cliGmail = document.getElementById('cliGmail').value.trim();
+  const cliDireccion = document.getElementById('cliDireccion').value.trim();
+
+  if(tipoEntregaSeleccionado === 'delivery' && cliDireccion === ''){
+    alert('Debes escribir la dirección de entrega para el delivery.');
+    return;
+  }
+
+  const pedido = {
+    clienteNombre: cliNombre,
+    clienteTelefono: cliTelefono,
+    clienteGmail: cliGmail,
+    tipoEntrega: tipoEntregaSeleccionado,
+    direccionEntrega: tipoEntregaSeleccionado === 'delivery' ? cliDireccion : '',
+    items: cart.map(it => ({ nombre: it.nombre, cantidad: it.cantidad, precio: it.precio, talla: it.talla })),
+    total: cartTotal(),
+    estado: 'nuevo',
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+
+  const btn = this.querySelector('button');
+  btn.disabled = true; btn.textContent = 'Enviando...';
+
+  try{
+    const docRef = await db.collection('tiendas').doc(currentStoreCI).collection('pedidos').add(pedido);
+
+    // Guardamos localmente el ID de este pedido para que el cliente pueda verlo luego en "Mis pedidos"
+    const key = 'cp_my_orders_' + currentStoreCI;
+    const misOrdenes = JSON.parse(localStorage.getItem(key) || '[]');
+    misOrdenes.push(docRef.id);
+    localStorage.setItem(key, JSON.stringify(misOrdenes));
+
+    // Preparamos el botón de WhatsApp hacia la tienda
+    const tiendaDoc = await db.collection('tiendas').doc(currentStoreCI).get();
+    const whatsapp = (tiendaDoc.data() || {}).whatsapp || '';
+    const resumenTexto = cart.map(it => `${it.cantidad}x ${it.nombre}`).join(', ');
+    const mensaje = encodeURIComponent(
+      `Hola, soy ${cliNombre}. Quiero confirmar mi pedido: ${resumenTexto}. Total: Bs ${cartTotal().toFixed(2)}`
+    );
+    const link = document.getElementById('btnWhatsappTienda');
+    if(whatsapp){
+      link.href = `https://wa.me/${whatsapp}?text=${mensaje}`;
+      link.style.display = 'inline-block';
+    } else {
+      link.style.display = 'none';
+    }
+
+    cart = [];
+    updateCartUI();
+    this.reset();
+    tipoEntregaSeleccionado = 'recojo';
+    document.querySelectorAll('#entregaOptions .chip').forEach((c, i) => c.classList.toggle('active', i === 0));
+    document.getElementById('direccionEntregaBox').style.display = 'none';
+    goTo('orderDone');
+  } catch(err){
+    console.error(err);
+    alert('Error al enviar el pedido. Intenta de nuevo.');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Confirmar pedido';
+  }
+});
+
+/* =========================================================
+   MIS PEDIDOS (vista del cliente que compró, lista 1)
+   Cada visitante guarda en su propio navegador (localStorage)
+   los IDs de sus pedidos, y aquí consulta su estado real
+   directo desde Firebase. No cruza con otros clientes ni
+   con otras tiendas, porque la clave usa el C.I. de la tienda.
+   ========================================================= */
+async function renderMisPedidos(){
+  const cont = document.getElementById('misPedidosList');
+  if(!currentStoreCI){ cont.innerHTML = ''; return; }
+
+  const key = 'cp_my_orders_' + currentStoreCI;
+  const misIds = JSON.parse(localStorage.getItem(key) || '[]');
+
+  if(misIds.length === 0){
+    cont.innerHTML = '<p style="color:var(--muted)">Todavía no hiciste ningún pedido en esta tienda.</p>';
+    return;
+  }
+
+  cont.innerHTML = '<p style="color:var(--muted)">Cargando...</p>';
+  const tiendaDoc = await db.collection('tiendas').doc(currentStoreCI).get();
+  const storeWhatsapp = (tiendaDoc.data() || {}).whatsapp || '';
+
+  const pedidosDocs = await Promise.all(
+    misIds.map(id => db.collection('tiendas').doc(currentStoreCI).collection('pedidos').doc(id).get())
+  );
+
+  cont.innerHTML = '';
+  let algunoValido = false;
+  let contador = 0;
+  pedidosDocs.forEach(doc => {
+    if(!doc.exists) return;
+    algunoValido = true;
+    contador++;
+    const p = doc.data();
+    const card = document.createElement('div');
+    card.className = 'pedido-card' + (p.estado === 'visto' ? ' visto' : '');
+    card.innerHTML = `
+      <div class="pedido-info">
+        <h4>#${contador} — Pedido <span class="pedido-estado">${p.estado === 'visto' ? '✓ Visto por la tienda' : '● En espera'}</span></h4>
+        <div class="pedido-items">${(p.items||[]).map(it => `${it.cantidad}x ${it.nombre}${it.talla && it.talla !== '-' ? ' (Talla ' + it.talla + ')' : ''}`).join(', ')}</div>
+        <div class="meta">${p.tipoEntrega === 'delivery' ? '🛵 Delivery: ' + (p.direccionEntrega || '-') : '🏬 Recojo en tienda'}</div>
+        <div class="price">Total: Bs ${Number(p.total).toFixed(2)}</div>
+      </div>
+      <div class="pedido-actions">
+        <a class="btn-neon small btn-wa" target="_blank">Llamar al anfitrión (WhatsApp)</a>
+      </div>
+    `;
+    if(storeWhatsapp){
+      const mensaje = encodeURIComponent(`Hola, soy ${p.clienteNombre}, quiero consultar sobre mi pedido.`);
+      card.querySelector('.btn-wa').href = `https://wa.me/${storeWhatsapp}?text=${mensaje}`;
+    } else {
+      card.querySelector('.btn-wa').style.display = 'none';
+    }
+    cont.appendChild(card);
+  });
+
+  if(!algunoValido){
+    cont.innerHTML = '<p style="color:var(--muted)">Todavía no hiciste ningún pedido en esta tienda.</p>';
+  }
+}
+
+/* =========================================================
+   PEDIDOS (vista del anfitrión/dueño de la tienda)
+   ========================================================= */
+async function renderPedidos(){
+  if(!session){ goTo('login'); return; }
+  const cont = document.getElementById('pedidosList');
+  cont.innerHTML = '<p style="color:var(--muted)">Cargando...</p>';
+
+  const snap = await db.collection('tiendas').doc(session.ci).collection('pedidos')
+    .orderBy('createdAt', 'desc').get();
+
+  cont.innerHTML = '';
+  if(snap.empty){
+    cont.innerHTML = '<p style="color:var(--muted)">Todavía no recibiste pedidos.</p>';
+    return;
+  }
+  let numero = 0;
+  snap.forEach((doc) => {
+    numero++;
+    const p = doc.data();
+    const card = document.createElement('div');
+    card.className = 'pedido-card';
+    card.innerHTML = `
+      <div class="pedido-num">${numero}</div>
+      <div class="pedido-info">
+        <h4>${p.clienteNombre}</h4>
+        ${p.clienteGmail ? `<div class="meta">${p.clienteGmail}</div>` : ''}
+        <div class="meta">📱 ${p.clienteTelefono || '-'}</div>
+        <div class="pedido-items">${(p.items||[]).map(it => `${it.cantidad}x ${it.nombre}${it.talla ? ' (Talla ' + it.talla + ')' : ''}`).join(', ')}</div>
+        <div class="meta">${p.tipoEntrega === 'delivery' ? '🛵 Delivery a domicilio: ' + (p.direccionEntrega || '-') : '🏬 Recojo en tienda'}</div>
+        <div class="price">Total: Bs ${Number(p.total).toFixed(2)}</div>
+      </div>
+      <div class="pedido-actions">
+        <span class="estado-pill ${p.estado === 'visto' ? 'visto' : 'nuevo'}">${p.estado === 'visto' ? 'Visto' : 'Nuevo'}</span>
+        <button class="btn-toggle-visto">${p.estado === 'visto' ? 'Ocultar' : 'Marcar visto'}</button>
+        <a class="btn-contactar" target="_blank">Contactar</a>
+      </div>
+    `;
+    if(p.clienteTelefono){
+      card.querySelector('.btn-contactar').href = `https://wa.me/${p.clienteTelefono}`;
+    } else {
+      card.querySelector('.btn-contactar').style.display = 'none';
+    }
+    card.querySelector('.btn-toggle-visto').addEventListener('click', async () => {
+      const nuevoEstado = p.estado === 'visto' ? 'nuevo' : 'visto';
+      await db.collection('tiendas').doc(session.ci).collection('pedidos').doc(doc.id)
+        .update({ estado: nuevoEstado });
+      renderPedidos();
+    });
+    cont.appendChild(card);
+  });
 }
 
 /* ---------- INICIO: revisar si viene un link de tienda ---------- */
