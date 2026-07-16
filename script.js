@@ -144,16 +144,21 @@ async function renderDashboard(){
 
 function productCard(p, id, isPublic){
   const div = document.createElement('div');
-  div.className = 'product-card';
+  div.className = 'product-card' + (p.agotado ? ' agotado' : '');
   div.innerHTML = `
     <img src="${p.foto || 'https://via.placeholder.com/300x200?text=Sin+foto'}" alt="${p.nombre}" class="product-img-clickable">
     <div class="info">
-      <h4>${p.nombre}</h4>
+      <h4>${p.nombre} ${p.agotado ? '<span class="agotado-tag">AGOTADO</span>' : ''}</h4>
       <div class="price">Bs ${Number(p.precio).toFixed(2)}</div>
       <div class="meta">Tallas: ${(p.tallas || []).join(', ') || '-'}</div>
       <div class="meta">Colores: ${p.colores || '-'}</div>
       <button class="btn-neon small outline ver-img-btn">Ver imagen</button>
-      ${isPublic ? `<button class="btn-neon small add-cart-btn">Agregar al carrito</button>` : ''}
+      ${isPublic
+        ? (p.agotado
+            ? `<button class="btn-neon small" disabled style="opacity:0.5; cursor:not-allowed;">Agotado</button>`
+            : `<button class="btn-neon small add-cart-btn">Agregar al carrito</button>`)
+        : `<button class="btn-neon small outline toggle-agotado-btn">${p.agotado ? 'Marcar disponible' : 'Marcar agotado'}</button>`
+      }
     </div>
   `;
   const img = div.querySelector('.product-img-clickable');
@@ -161,9 +166,25 @@ function productCard(p, id, isPublic){
   img.addEventListener('click', () => openImageModal(imgSrc));
   div.querySelector('.ver-img-btn').addEventListener('click', () => openImageModal(imgSrc));
   if(isPublic){
-    div.querySelector('.add-cart-btn').addEventListener('click', () => openTallaModal(id, p));
+    if(!p.agotado){
+      div.querySelector('.add-cart-btn').addEventListener('click', () => openTallaModal(id, p));
+    }
+  } else {
+    div.querySelector('.toggle-agotado-btn').addEventListener('click', () => toggleAgotado(id, p.agotado));
   }
   return div;
+}
+
+async function toggleAgotado(id, estadoActual){
+  if(!session) return;
+  try{
+    await db.collection('tiendas').doc(session.ci).collection('productos').doc(id)
+      .update({ agotado: !estadoActual });
+    renderDashboard();
+  } catch(err){
+    console.error(err);
+    alert('Error al actualizar el producto.');
+  }
 }
 
 function openImageModal(src){
