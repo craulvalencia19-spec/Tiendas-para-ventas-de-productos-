@@ -72,6 +72,13 @@ document.getElementById('formRegister').addEventListener('submit', async functio
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
 
+    // Guardamos también una versión "liviana" (sin fotos pesadas) para que la
+    // página de Inicio cargue rápido sin importar cuántas tiendas se sumen.
+    await db.collection('tiendas_publicas').doc(ci).set({
+      ci, empresa, logo: '',
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+
     session = { ci };
     sessionStorage.setItem('cp_session', JSON.stringify(session));
     updateNav();
@@ -321,6 +328,17 @@ document.getElementById('btnGuardarDatosTienda').addEventListener('click', async
     const datos = { whatsapp, direccion, deliveryHabilitado };
     if(logo) datos.logo = logo;
     await db.collection('tiendas').doc(session.ci).update(datos);
+
+    // Actualizamos siempre la versión liviana (con o sin logo), para que
+    // esta tienda aparezca en la lista de Inicio.
+    const empresaDoc = await db.collection('tiendas').doc(session.ci).get();
+    await db.collection('tiendas_publicas').doc(session.ci).set({
+      ci: session.ci,
+      empresa: empresaDoc.data().empresa,
+      logo: logo || empresaDoc.data().logo || '',
+      createdAt: empresaDoc.data().createdAt || firebase.firestore.FieldValue.serverTimestamp()
+    });
+
     alert('Datos guardados correctamente.');
   } catch(err){
     console.error(err);
@@ -352,6 +370,9 @@ document.getElementById('btnEliminarCuenta').addEventListener('click', async fun
 
     // Borramos la tienda
     await db.collection('tiendas').doc(ci).delete();
+
+    // Borramos también su versión liviana de la lista de Inicio
+    await db.collection('tiendas_publicas').doc(ci).delete();
 
     alert('Tu cuenta y tu tienda fueron eliminadas.');
     logout();
@@ -435,7 +456,7 @@ async function renderStoreList(){
   const cont = document.getElementById('storeList');
   cont.innerHTML = '<p style="color:var(--muted); text-align:center; grid-column:1/-1;">Cargando...</p>';
 
-  const snap = await db.collection('tiendas').orderBy('createdAt', 'desc').get();
+  const snap = await db.collection('tiendas_publicas').orderBy('createdAt', 'desc').get();
   todasLasTiendas = [];
   snap.forEach(doc => todasLasTiendas.push(doc.data()));
   // Le damos un número fijo a cada una según el orden en que se crearon (más antigua = 1)
@@ -502,7 +523,12 @@ async function renderStoreFront(ci){
   document.getElementById('storeNombre').textContent = '...';
   cont.innerHTML = '<p style="color:var(--muted); text-align:center; grid-column:1/-1;">Cargando...</p>';
 
-  const userDoc = await db.collection('tiendas').doc(ci).get();
+  // Pedimos los datos de la tienda Y los productos AL MISMO TIEMPO (antes se pedían uno después del otro, tardaba el doble)
+  const [userDoc, snap] = await Promise.all([
+    db.collection('tiendas').doc(ci).get(),
+    db.collection('tiendas').doc(ci).collection('productos').orderBy('createdAt', 'desc').get()
+  ]);
+
   if(!userDoc.exists){
     alert('Esta tienda no existe o el enlace no es válido.');
     goTo('home');
@@ -551,9 +577,6 @@ async function renderStoreFront(ci){
   if(currentStoreCI !== ci){ cart = []; currentStoreCI = ci; }
   currentStoreDeliveryEnabled = !!userDoc.data().deliveryHabilitado;
   updateCartUI();
-
-  const snap = await db.collection('tiendas').doc(ci).collection('productos')
-    .orderBy('createdAt', 'desc').get();
 
   cont.innerHTML = '';
   if(snap.empty){
