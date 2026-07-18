@@ -125,6 +125,12 @@ async function renderDashboard(){
   document.getElementById('editDireccion').value = userDoc.data().direccion || '';
   document.getElementById('editDeliveryHabilitado').checked = !!userDoc.data().deliveryHabilitado;
 
+  const logoGuardado = userDoc.data().logo;
+  if(logoGuardado){
+    document.getElementById('editLogoPreview').src = logoGuardado;
+    document.getElementById('editLogoPreview').style.display = 'block';
+  }
+
   const qrPagoGuardado = userDoc.data().qrPago;
   if(qrPagoGuardado){
     document.getElementById('pagoQrPreview').src = qrPagoGuardado;
@@ -272,12 +278,38 @@ document.getElementById('formProduct').addEventListener('submit', async function
   }
 });
 
-/* ---------- EDITAR DATOS DE CONTACTO (whatsapp, dirección) ---------- */
+/* ---------- LOGO DE LA TIENDA ---------- */
+document.getElementById('editLogoFoto').addEventListener('change', function(e){
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = evt => {
+    const img = new Image();
+    img.onload = () => {
+      const maxWidth = 300;
+      const scale = Math.min(1, maxWidth / img.width);
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width * scale;
+      canvas.height = img.height * scale;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const compressed = canvas.toDataURL('image/png');
+      document.getElementById('editLogoPreview').src = compressed;
+      document.getElementById('editLogoPreview').style.display = 'block';
+    };
+    img.src = evt.target.result;
+  };
+  reader.readAsDataURL(file);
+});
+
+/* ---------- EDITAR DATOS DE CONTACTO (whatsapp, dirección, logo) ---------- */
 document.getElementById('btnGuardarDatosTienda').addEventListener('click', async function(){
   if(!session) return;
   const whatsapp = document.getElementById('editWhatsapp').value.trim().replace(/\D/g, '');
   const direccion = document.getElementById('editDireccion').value.trim();
   const deliveryHabilitado = document.getElementById('editDeliveryHabilitado').checked;
+  const logoPreview = document.getElementById('editLogoPreview');
+  const logo = logoPreview.style.display === 'block' ? logoPreview.src : '';
 
   if(whatsapp === ''){
     alert('Debes ingresar un número de WhatsApp para que tus clientes puedan contactarte.');
@@ -286,13 +318,47 @@ document.getElementById('btnGuardarDatosTienda').addEventListener('click', async
 
   this.disabled = true; this.textContent = 'Guardando...';
   try{
-    await db.collection('tiendas').doc(session.ci).update({ whatsapp, direccion, deliveryHabilitado });
+    const datos = { whatsapp, direccion, deliveryHabilitado };
+    if(logo) datos.logo = logo;
+    await db.collection('tiendas').doc(session.ci).update(datos);
     alert('Datos guardados correctamente.');
   } catch(err){
     console.error(err);
     alert('Error al guardar los datos.');
   } finally {
     this.disabled = false; this.textContent = 'Guardar datos';
+  }
+});
+
+/* ---------- ELIMINAR CUENTA (zona de peligro, solo el anfitrión) ---------- */
+document.getElementById('btnEliminarCuenta').addEventListener('click', async function(){
+  if(!session) return;
+  const confirmacion = prompt('Esto borrará tu tienda para siempre. Escribe ELIMINAR para confirmar:');
+  if(confirmacion !== 'ELIMINAR'){
+    return;
+  }
+
+  this.disabled = true; this.textContent = 'Eliminando...';
+  try{
+    const ci = session.ci;
+
+    // Borramos los productos
+    const productosSnap = await db.collection('tiendas').doc(ci).collection('productos').get();
+    await Promise.all(productosSnap.docs.map(d => d.ref.delete()));
+
+    // Borramos los pedidos
+    const pedidosSnap = await db.collection('tiendas').doc(ci).collection('pedidos').get();
+    await Promise.all(pedidosSnap.docs.map(d => d.ref.delete()));
+
+    // Borramos la tienda
+    await db.collection('tiendas').doc(ci).delete();
+
+    alert('Tu cuenta y tu tienda fueron eliminadas.');
+    logout();
+  } catch(err){
+    console.error(err);
+    alert('Error al eliminar la cuenta.');
+    this.disabled = false; this.textContent = 'Eliminar cuenta';
   }
 });
 
@@ -361,26 +427,74 @@ function copyLink(){
   alert('Enlace copiado.');
 }
 
-/* ---------- LISTA DE TIENDAS (home) ---------- */
+/* ---------- LISTA DE TIENDAS (home) con buscador ---------- */
+let todasLasTiendas = []; // cache en memoria para filtrar sin volver a consultar Firebase
+let searchMode = 'nombre'; // 'nombre' o 'numero'
+
 async function renderStoreList(){
   const cont = document.getElementById('storeList');
   cont.innerHTML = '<p style="color:var(--muted); text-align:center; grid-column:1/-1;">Cargando...</p>';
 
   const snap = await db.collection('tiendas').orderBy('createdAt', 'desc').get();
+  todasLasTiendas = [];
+  snap.forEach(doc => todasLasTiendas.push(doc.data()));
+  // Le damos un número fijo a cada una según el orden en que se crearon (más antigua = 1)
+  const ordenAscendente = [...todasLasTiendas].reverse();
+  ordenAscendente.forEach((u, i) => { u.numero = i + 1; });
+
+  document.getElementById('searchStoreInput').value = '';
+  pintarListaTiendas(todasLasTiendas);
+}
+
+function pintarListaTiendas(lista){
+  const cont = document.getElementById('storeList');
   cont.innerHTML = '';
-  if(snap.empty){
-    cont.innerHTML = '<p style="color:var(--muted); text-align:center; grid-column:1/-1;">Todavía no hay tiendas creadas. ¡Sé el primero!</p>';
+  if(lista.length === 0){
+    cont.innerHTML = '<p style="color:var(--muted); text-align:center; grid-column:1/-1;">No se encontraron tiendas.</p>';
     return;
   }
-  snap.forEach(doc => {
-    const u = doc.data();
+  lista.forEach(u => {
     const card = document.createElement('div');
     card.className = 'store-card';
-    card.innerHTML = `<h3>${u.empresa}</h3><p>Ver catálogo</p>`;
+    card.innerHTML = `
+      <div class="store-card-num">#${u.numero}</div>
+      ${u.logo ? `<img src="${u.logo}" class="store-card-logo" alt="${u.empresa}">` : ''}
+      <h3>${u.empresa}</h3>
+      <p>Ver catálogo</p>
+    `;
     card.onclick = () => { window.history.pushState({}, '', '?tienda=' + u.ci); goTo('store', u.ci); };
     cont.appendChild(card);
   });
 }
+
+document.querySelectorAll('#searchModeOptions .chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('#searchModeOptions .chip').forEach(c => c.classList.remove('active'));
+    chip.classList.add('active');
+    searchMode = chip.dataset.val;
+    const input = document.getElementById('searchStoreInput');
+    input.placeholder = searchMode === 'nombre'
+      ? 'Escribe el nombre de la empresa...'
+      : 'Escribe el número de la tienda...';
+    input.value = '';
+    pintarListaTiendas(todasLasTiendas);
+  });
+});
+
+document.getElementById('searchStoreInput').addEventListener('input', function(){
+  const texto = this.value.trim().toLowerCase();
+  if(texto === ''){
+    pintarListaTiendas(todasLasTiendas);
+    return;
+  }
+  let filtradas;
+  if(searchMode === 'numero'){
+    filtradas = todasLasTiendas.filter(u => String(u.numero).includes(texto));
+  } else {
+    filtradas = todasLasTiendas.filter(u => u.empresa.toLowerCase().includes(texto));
+  }
+  pintarListaTiendas(filtradas);
+});
 
 /* ---------- VISTA PÚBLICA DE TIENDA ---------- */
 async function renderStoreFront(ci){
@@ -395,6 +509,14 @@ async function renderStoreFront(ci){
     return;
   }
   document.getElementById('storeNombre').textContent = userDoc.data().empresa;
+
+  const logoEl = document.getElementById('storeLogoImg');
+  if(userDoc.data().logo){
+    logoEl.src = userDoc.data().logo;
+    logoEl.style.display = 'block';
+  } else {
+    logoEl.style.display = 'none';
+  }
 
   // Botón flotante de WhatsApp: usa el número propio de ESTA tienda (no se cruza con otras)
   const waFloat = document.getElementById('whatsappFloat');

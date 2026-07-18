@@ -4,8 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Crissport</title>
-<link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#06060c">
 <link rel="stylesheet" href="style.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 
@@ -85,6 +83,15 @@
 
   <div class="explore">
     <h2>Tiendas creadas</h2>
+
+    <div class="search-box">
+      <div class="chip-select" id="searchModeOptions">
+        <span class="chip active" data-val="nombre">Buscar por nombre</span>
+        <span class="chip" data-val="numero">Buscar por número</span>
+      </div>
+      <input type="text" id="searchStoreInput" placeholder="Escribe el nombre de la empresa...">
+    </div>
+
     <div id="storeList" class="store-grid"></div>
   </div>
 </section>
@@ -151,12 +158,22 @@
     <label>¿En qué lugares vendes? (opcional)</label>
     <textarea id="editDireccion" rows="2" placeholder="Ej. Mercado Camacho, Feria 16 de Julio los domingos..."></textarea>
 
+    <label>Logo de tu tienda (opcional)</label>
+    <input type="file" id="editLogoFoto" accept="image/*">
+    <img id="editLogoPreview" class="preview-img" style="display:none; max-height:120px;">
+
     <label style="display:flex; align-items:center; gap:10px; margin-top:16px;">
       <input type="checkbox" id="editDeliveryHabilitado" style="width:auto;">
       Ofrecer delivery a domicilio (si no lo activas, tus clientes solo verán "Recojo en tienda")
     </label>
 
     <button class="btn-neon small" id="btnGuardarDatosTienda" style="margin-top:14px;">Guardar datos</button>
+  </div>
+
+  <div class="panel" style="margin-bottom:30px; border-color: var(--pink);">
+    <h2 style="color:var(--pink); text-shadow:0 0 8px var(--pink);">Zona de peligro</h2>
+    <p style="color:var(--muted); font-size:13px;">Esto borra tu tienda, tus productos y tus pedidos de forma permanente. No se puede deshacer.</p>
+    <button class="btn-neon small" id="btnEliminarCuenta" style="background: linear-gradient(135deg, #ff2f2f, #7b0000); margin-top:10px;">Eliminar cuenta</button>
   </div>
 
   <div class="panel" style="margin-bottom:30px;">
@@ -222,6 +239,7 @@
 <!-- ================= STORE FRONT (vista pública tipo tienda) ================= -->
 <section id="view-store" class="view">
   <div class="store-header">
+    <img id="storeLogoImg" class="store-logo-big" src="" alt="Logo" style="display:none">
     <h1 id="storeNombre"></h1>
     <p>Catálogo oficial</p>
     <div id="storeInfoExtra" class="store-info-extra"></div>
@@ -317,14 +335,5 @@
 
 <script src="firebase-config.js"></script>
 <script src="script.js"></script>
-
-<script>
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js');
-  });
-}
-</script>
-
 </body>
 </html>
