@@ -82,6 +82,7 @@ document.getElementById('formRegister').addEventListener('submit', async functio
     session = { ci };
     sessionStorage.setItem('cp_session', JSON.stringify(session));
     updateNav();
+    revisarPedidosNuevos();
     alert('Cuenta creada correctamente. Bienvenido/a, ' + nombre + '.');
     goTo('dashboard');
   } catch(err){
@@ -110,6 +111,7 @@ document.getElementById('formLogin').addEventListener('submit', async function(e
     session = { ci };
     sessionStorage.setItem('cp_session', JSON.stringify(session));
     updateNav();
+    revisarPedidosNuevos();
     goTo('dashboard');
   } catch(err){
     console.error(err);
@@ -165,12 +167,15 @@ function productCard(p, id, isPublic){
       <div class="price">Bs ${Number(p.precio).toFixed(2)}</div>
       <div class="meta">Tallas: ${(p.tallas || []).join(', ') || '-'}</div>
       <div class="meta">Colores: ${p.colores || '-'}</div>
+      ${p.material ? `<div class="meta">Material: ${p.material}</div>` : ''}
+      ${p.descripcion ? `<div class="meta product-desc">${p.descripcion}</div>` : ''}
       <button class="btn-neon small outline ver-img-btn">Ver imagen</button>
       ${isPublic
         ? (p.agotado
             ? `<button class="btn-neon small" disabled style="opacity:0.5; cursor:not-allowed;">Agotado</button>`
             : `<button class="btn-neon small add-cart-btn">Agregar al carrito</button>`)
-        : `<button class="btn-neon small outline toggle-agotado-btn">${p.agotado ? 'Marcar disponible' : 'Marcar agotado'}</button>`
+        : `<button class="btn-neon small outline toggle-agotado-btn">${p.agotado ? 'Marcar disponible' : 'Marcar agotado'}</button>
+           <button class="btn-neon small delete-product-btn" style="background: linear-gradient(135deg, #ff2f2f, #7b0000); margin-top:8px;">🗑 Eliminar producto</button>`
       }
     </div>
   `;
@@ -184,6 +189,7 @@ function productCard(p, id, isPublic){
     }
   } else {
     div.querySelector('.toggle-agotado-btn').addEventListener('click', () => toggleAgotado(id, p.agotado));
+    div.querySelector('.delete-product-btn').addEventListener('click', () => eliminarProducto(id, p.nombre));
   }
   return div;
 }
@@ -197,6 +203,19 @@ async function toggleAgotado(id, estadoActual){
   } catch(err){
     console.error(err);
     alert('Error al actualizar el producto.');
+  }
+}
+
+async function eliminarProducto(id, nombre){
+  if(!session) return;
+  const confirmar = confirm(`¿Seguro que quieres eliminar "${nombre}"? Esta acción no se puede deshacer.`);
+  if(!confirmar) return;
+  try{
+    await db.collection('tiendas').doc(session.ci).collection('productos').doc(id).delete();
+    renderDashboard();
+  } catch(err){
+    console.error(err);
+    alert('Error al eliminar el producto.');
   }
 }
 
@@ -939,12 +958,16 @@ async function renderPedidos(){
   cont.innerHTML = '';
   if(snap.empty){
     cont.innerHTML = '<p style="color:var(--muted)">Todavía no recibiste pedidos.</p>';
+    actualizarBadgePedidos(0);
     return;
   }
   let numero = 0;
+  let nuevos = 0;
   snap.forEach((doc) => {
     numero++;
     const p = doc.data();
+    if(p.estado !== 'visto') nuevos++;
+    const fechaTexto = formatearFecha(p.createdAt);
     const card = document.createElement('div');
     card.className = 'pedido-card';
     card.innerHTML = `
@@ -953,6 +976,7 @@ async function renderPedidos(){
         <h4>${p.clienteNombre}</h4>
         ${p.clienteGmail ? `<div class="meta">${p.clienteGmail}</div>` : ''}
         <div class="meta">📱 ${p.clienteTelefono || '-'}</div>
+        <div class="meta">🕒 ${fechaTexto}</div>
         <div class="pedido-items">${(p.items||[]).map(it => `${it.cantidad}x ${it.nombre}${it.talla ? ' (Talla ' + it.talla + ')' : ''}`).join(', ')}</div>
         <div class="meta">${p.tipoEntrega === 'delivery' ? '🛵 Delivery a domicilio: ' + (p.direccionEntrega || '-') : '🏬 Recojo en tienda'}</div>
         ${p.tipoEntrega === 'delivery' && p.nombreReceptor ? `<div class="meta">Recibe: ${p.nombreReceptor}</div>` : ''}
@@ -963,6 +987,7 @@ async function renderPedidos(){
         <span class="estado-pill ${p.estado === 'visto' ? 'visto' : 'nuevo'}">${p.estado === 'visto' ? 'Visto' : 'Nuevo'}</span>
         <button class="btn-toggle-visto">${p.estado === 'visto' ? 'Ocultar' : 'Marcar visto'}</button>
         <a class="btn-contactar" target="_blank">Contactar</a>
+        <button class="btn-quitar-pedido">Quitar pedido</button>
       </div>
     `;
     if(p.clienteTelefono){
@@ -976,13 +1001,53 @@ async function renderPedidos(){
         .update({ estado: nuevoEstado });
       renderPedidos();
     });
+    card.querySelector('.btn-quitar-pedido').addEventListener('click', async () => {
+      const confirmar = confirm('¿Quitar este pedido de la lista? Esta acción no se puede deshacer.');
+      if(!confirmar) return;
+      await db.collection('tiendas').doc(session.ci).collection('pedidos').doc(doc.id).delete();
+      renderPedidos();
+    });
     cont.appendChild(card);
   });
+  actualizarBadgePedidos(nuevos);
+}
+
+function formatearFecha(timestamp){
+  if(!timestamp || !timestamp.toDate) return 'Fecha no disponible';
+  const fecha = timestamp.toDate();
+  return fecha.toLocaleString('es-BO', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit'
+  });
+}
+
+function actualizarBadgePedidos(cantidad){
+  const badge = document.getElementById('pedidosBadge');
+  if(cantidad > 0){
+    badge.textContent = cantidad > 99 ? '99+' : cantidad;
+    badge.style.display = 'flex';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+/* Revisa cuántos pedidos nuevos hay apenas el anfitrión entra o inicia sesión,
+   para que el número rojo aparezca aunque no haya abierto "Pedidos" todavía. */
+async function revisarPedidosNuevos(){
+  if(!session) return;
+  try{
+    const snap = await db.collection('tiendas').doc(session.ci).collection('pedidos')
+      .where('estado', '!=', 'visto').get();
+    actualizarBadgePedidos(snap.size);
+  } catch(err){
+    console.error(err);
+  }
 }
 
 /* ---------- INICIO: revisar si viene un link de tienda ---------- */
 window.addEventListener('DOMContentLoaded', () => {
   updateNav();
+  if(session) revisarPedidosNuevos();
   const params = new URLSearchParams(window.location.search);
   const ci = params.get('tienda');
   if(ci){

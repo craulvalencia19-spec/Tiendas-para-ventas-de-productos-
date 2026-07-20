@@ -21,7 +21,10 @@
   <nav>
     <button class="nav-btn" onclick="goTo('home')">Inicio</button>
     <button class="nav-btn" id="btnMiTienda" onclick="goTo('dashboard')" style="display:none">Mi tienda</button>
-    <button class="nav-btn" id="btnPedidos" onclick="goTo('pedidos')" style="display:none">Pedidos</button>
+    <button class="nav-btn nav-btn-badge" id="btnPedidos" onclick="goTo('pedidos')" style="display:none">
+      Pedidos
+      <span id="pedidosBadge" class="badge-count" style="display:none">0</span>
+    </button>
     <button class="nav-btn" id="btnLogin" onclick="goTo('login')">Ingresar</button>
     <button class="nav-btn" id="btnLogout" onclick="logout()" style="display:none">Salir</button>
   </nav>
